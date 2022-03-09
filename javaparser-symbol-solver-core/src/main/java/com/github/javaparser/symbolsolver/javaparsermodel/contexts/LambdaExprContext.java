@@ -31,6 +31,7 @@ import com.github.javaparser.ast.expr.LambdaExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.stmt.ReturnStmt;
 import com.github.javaparser.resolution.MethodUsage;
+import com.github.javaparser.resolution.declarations.*;
 import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
 import com.github.javaparser.resolution.declarations.ResolvedTypeParameterDeclaration;
 import com.github.javaparser.resolution.declarations.ResolvedValueDeclaration;
@@ -47,6 +48,7 @@ import com.github.javaparser.symbolsolver.model.typesystem.ReferenceTypeImpl;
 import com.github.javaparser.symbolsolver.reflectionmodel.MyObjectProvider;
 import com.github.javaparser.symbolsolver.resolution.SymbolDeclarator;
 
+import java.util.stream.Collectors;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -62,6 +64,52 @@ public class LambdaExprContext extends AbstractJavaParserContext<LambdaExpr> {
 
     public LambdaExprContext(LambdaExpr wrappedNode, TypeSolver typeSolver) {
         super(wrappedNode, typeSolver);
+    }
+
+    @Override
+    public SymbolReference<ResolvedTypeDeclaration> solveType(String name) {
+        Optional<VariableDeclarator> optionalVariableDeclarator = wrappedNode.findAncestor(VariableDeclarator.class);
+        if (optionalVariableDeclarator.isPresent()) {
+            Optional<ResolvedReferenceTypeDeclaration> optionalResolvedReferenceTypeDeclaration = optionalVariableDeclarator.get().resolve()
+                    .getType().asReferenceType()
+                    .getTypeDeclaration();
+
+            if (!optionalResolvedReferenceTypeDeclaration.isPresent()) {
+                return SymbolReference.unsolved(null);
+            }
+
+            List<ResolvedMethodDeclaration> resolvedMethodDeclarations = optionalResolvedReferenceTypeDeclaration.get().getDeclaredMethods().stream()
+                    .filter(ResolvedMethodDeclaration::isAbstract)
+                    .collect(Collectors.toList());
+
+            if (resolvedMethodDeclarations.size() != 1) {
+                return SymbolReference.unsolved(null);
+            }
+            ResolvedMethodDeclaration resolvedMethodDeclaration = resolvedMethodDeclarations.get(0);
+            if (resolvedMethodDeclaration.getNumberOfParams() != wrappedNode.getParameters().size()) {
+                return SymbolReference.unsolved(null);
+            }
+
+            int parameterIndex = -1;
+            for (int i = 0; i < wrappedNode.getParameters().size(); i++) {
+                String parameterName = wrappedNode.getParameter(i).getNameAsString();
+                if (name.equals(parameterName)) {
+                    parameterIndex = i;
+                    break;
+                }
+            }
+
+            if (parameterIndex > 0) {
+                Optional<? extends ResolvedTypeDeclaration> optionalResolvedTypeDeclaration = resolvedMethodDeclaration.getParam(parameterIndex)
+                        .getType().asReferenceType().getTypeDeclaration();
+
+                if (optionalResolvedTypeDeclaration.isPresent()) {
+                    return SymbolReference.solved(optionalResolvedTypeDeclaration.get());
+                }
+            }
+        }
+
+        return super.solveType(name);
     }
 
     @Override
